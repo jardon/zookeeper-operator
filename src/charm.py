@@ -6,6 +6,7 @@
 
 import logging
 import time
+import os
 
 from charms.kafka.v0.kafka_snap import KafkaSnap
 from charms.rolling_ops.v0.rollingops import RollingOpsManager
@@ -16,6 +17,7 @@ from charms.zookeeper.v0.cluster import (
     ZooKeeperCluster,
 )
 from charms.zookeeper.v0.zookeeper_provider import ZooKeeperProvider
+from charms.tls_certificates_interface.v0.tls_certificates import TLSCertificatesRequires
 from ops.charm import CharmBase
 from ops.framework import EventBase
 from ops.main import main
@@ -52,6 +54,19 @@ class ZooKeeperCharm(CharmBase):
         )
         self.framework.observe(
             getattr(self.on, "cluster_relation_departed"), self._on_cluster_relation_updated
+        )
+        self.tls_certificates = TLSCertificatesRequires(self, "certificates")
+        self.framework.observe(
+            self.tls_certificates.on.certificate_available, self._on_certificate_available
+        )
+        self.framework.observe(
+            getattr(self.on, "certificates_relation_changed"), self._on_certificate_available
+        )
+        self.framework.observe(
+            getattr(self.on, "certificates_relation_joined"), self._on_certificate_available
+        )
+        self.framework.observe(
+            getattr(self.on, "certificates_relation_departed"), self._on_certificate_relation_departed
         )
 
     def _on_install(self, _) -> None:
@@ -181,6 +196,18 @@ class ZooKeeperCharm(CharmBase):
 
         self._on_start(event=event)
 
+    def _on_certificate_available(self, event: EventBase):
+        self.tls_certificates.request_certificate(
+            cert_type="server",
+            common_name=f"{os.uname()[1]}",
+        )
+        for k,v in event.certificate_data:
+            f = open(f"{k}", "w")
+            f.write(v)
+            f.close()
+
+    def _on_certificate_relation_departed(self, event: EventBase):
+        pass
 
 if __name__ == "__main__":
     main(ZooKeeperCharm)

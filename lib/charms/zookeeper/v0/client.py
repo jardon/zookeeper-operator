@@ -259,6 +259,7 @@ class ZooKeeperClient:
             hosts=f"{host}:{client_port}",
             timeout=1.0,
             sasl_options={"mechanism": "DIGEST-MD5", "username": username, "password": password},
+            use_ssl=True,
         )
         self.client.start()
 
