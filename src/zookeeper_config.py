@@ -5,6 +5,7 @@
 """Manager for handling ZooKeeper auth configuration."""
 
 import logging
+from pathlib import Path
 
 from charms.kafka.v0.kafka_snap import DATA_DIR, SNAP_CONFIG_PATH, safe_write_to_file
 
@@ -39,6 +40,21 @@ quorum.auth.learnerRequireSasl=true
 quorum.auth.serverRequireSasl=true
 authProvider.sasl=org.apache.zookeeper.server.auth.SASLAuthenticationProvider
 audit.enable=true"""
+
+TLS_STORE_DIR = "/var/snap/kafka/common/certs"
+
+TLS_TRUSTSTORE = "ca"
+
+TLS_ZOOKEEPER_PROPERTIES = f"""
+secureClientPort=2182
+serverCnxnFactory=org.apache.zookeeper.server.NettyServerCnxnFactory
+authProvider.x509=org.apache.zookeeper.server.auth.X509AuthenticationProvider
+ssl.trustStore.location={TLS_STORE_DIR}/{TLS_TRUSTSTORE}
+ssl.trustStore.type=PEM
+ssl.quorum.trustStore.type=PEM
+zookeeper.ssl.client.enable=true
+zookeeper.set.acl=true
+ssl.clientAuth=none"""
 
 
 class ZooKeeperConfig:
@@ -91,4 +107,13 @@ class ZooKeeperConfig:
             if config.get(k, None) is not None:
                 props += f"\n{v}={config[k]}"
 
+        if self.ssl_enabled():
+            props += TLS_ZOOKEEPER_PROPERTIES
+
         return props
+
+    def ssl_enabled(self):
+        """Checks for the certificates needed for TLS."""
+        truststore = Path(f"{TLS_STORE_DIR}/{TLS_TRUSTSTORE}")
+
+        return truststore.is_file()

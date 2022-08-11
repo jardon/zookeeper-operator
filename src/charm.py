@@ -5,9 +5,14 @@
 """Charmed Machine Operator for Apache ZooKeeper."""
 
 import logging
+import os
+from pathlib import Path
 
 from charms.kafka.v0.kafka_snap import KafkaSnap
 from charms.rolling_ops.v0.rollingops import RollingOpsManager
+from charms.tls_certificates_interface.v0.tls_certificates import (
+    TLSCertificatesRequires,
+)
 from charms.zookeeper.v0.cluster import (
     NoPasswordError,
     NotUnitTurnError,
@@ -20,7 +25,7 @@ from ops.framework import EventBase
 from ops.main import main
 from ops.model import ActiveStatus, BlockedStatus, MaintenanceStatus
 
-from zookeeper_config import ZooKeeperConfig
+from zookeeper_config import TLS_STORE_DIR, ZooKeeperConfig
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +60,24 @@ class ZooKeeperCharm(CharmBase):
         )
         self.framework.observe(
             getattr(self.on, "cluster_relation_departed"), self._on_cluster_relation_updated
+        )
+        self.tls_certificates = TLSCertificatesRequires(self, "certificates")
+        self.framework.observe(
+            self.tls_certificates.on.certificate_available, self._on_certificate_available
+        )
+        self.framework.observe(
+            getattr(self.on, "certificates_relation_changed"), self._on_certificate_relation_joined
+        )
+        self.framework.observe(
+            getattr(self.on, "certificates_relation_joined"), self._on_certificate_relation_joined
+        )
+        self.framework.observe(
+            getattr(self.on, "certificates_relation_departed"),
+            self._on_certificate_relation_departed,
+        )
+        self.framework.observe(
+            getattr(self.on, "certificates_relation_broken"),
+            self._on_certificate_relation_departed,
         )
 
     def _on_install(self, _) -> None:
@@ -196,6 +219,32 @@ class ZooKeeperCharm(CharmBase):
             return
 
         self._on_start(event=event)
+
+    def _on_certificate_relation_joined(self, event):
+        self.tls_certificates.request_certificate(
+            cert_type="server",
+            common_name=f"{os.uname()[1]}",
+        )
+
+    def _on_certificate_available(self, event):
+        certificate_data = event.certificate_data
+        path = Path(TLS_STORE_DIR)
+        path.mkdir(parents=True, exist_ok=True)
+        for k, v in certificate_data.items():
+            f = open(f"{TLS_STORE_DIR}/{k}", "w")
+            f.write(v)
+            f.close()
+        self.snap.write_properties(
+            properties=self.zookeeper_config.create_properties(self.config),
+            property_label="zookeeper",
+        )
+        self.on[self.restart.name].acquire_lock.emit()
+
+    def _on_certificate_relation_departed(self, event: EventBase):
+        if not self.config["retain-certs"]:
+            for file in ["ca", "cert", "key", "common_name"]:
+                if os.path.exists(f"{TLS_STORE_DIR}/{file}"):
+                    os.remove(f"{TLS_STORE_DIR}/{file}")
 
 
 if __name__ == "__main__":
